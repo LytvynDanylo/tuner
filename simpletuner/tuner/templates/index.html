@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guitar Tuner</title>
+</head>
+<body>
+
+    <div class="card">
+        <h2>Guitar Tuner</h2>
+        <div class="note" id="noteDisplay">--</div>
+        <div class="freq" id="freqDisplay">0.0 Hz</div>
+        <button id="startBtn">Включить микрофон</button>
+    </div>
+
+    <script>
+        const NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+        let audioCtx = null;
+        let analyser = null;
+        let isRunning = false;
+
+        document.getElementById('startBtn').addEventListener('click', async () => {
+            if (isRunning) return;
+            
+            try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const source = audioCtx.createMediaStreamSource(stream);
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 2048;
+                source.connect(analyser);
+
+                document.getElementById('startBtn').innerText = "Микрофон активен";
+                document.getElementById('startBtn').style.background = "#444";
+                document.getElementById('startBtn').style.color = "#888";
+                isRunning = true;
+
+                updateTuner();
+            } catch (err) {
+                alert("Ошибка доступа к микрофону: " + err.message);
+            }
+        });
+
+        function updateTuner() {
+            const buffer = new Float32Array(analyser.fftSize);
+            analyser.getFloatTimeDomainData(buffer);
+
+            const freq = autoCorrelate(buffer, audioCtx.sampleRate);
+
+            if (freq !== -1) {
+                document.getElementById('freqDisplay').innerText = freq.toFixed(1) + " Hz";
+                document.getElementById('noteDisplay').innerText = freqToNote(freq);
+            }
+
+            requestAnimationFrame(updateTuner);
+        }
+
+        // Алгоритм автокорреляции для поиска основной частоты сигнала
+        function autoCorrelate(buf, sampleRate) {
+            let SIZE = buf.length;
+            let rms = 0;
+
+            for (let i = 0; i < SIZE; i++) {
+                rms += buf[i] * buf[i];
+            }
+            rms = Math.sqrt(rms / SIZE);
+            if (rms < 0.01) return -1; // Звук слишком тихий
+
+            let r1 = 0, r2 = SIZE - 1, thres = 0.2;
+            for (let i = 0; i < SIZE / 2; i++) {
+                if (Math.abs(buf[i]) < thres) { r1 = i; break; }
+            }
+            for (let i = 1; i < SIZE / 2; i++) {
+                if (Math.abs(buf[SIZE - i]) < thres) { r2 = SIZE - i; break; }
+            }
+
+            buf = buf.slice(r1, r2);
+            SIZE = buf.length;
+
+            let c = new Array(SIZE).fill(0);
+            for (let i = 0; i < SIZE; i++) {
+                for (let j = 0; j < SIZE - i; j++) {
+                    c[i] = c[i] + buf[j] * buf[j + i];
+                }
+            }
+
+            let d = 0;
+            while (c[d] > c[d + 1]) d++;
+            let maxval = -1, maxpos = -1;
+            for (let i = d; i < SIZE; i++) {
+                if (c[i] > maxval) {
+                    maxval = c[i];
+                    maxpos = i;
+                }
+            }
+            let T0 = maxpos;
+
+            return sampleRate / T0;
+        }
+
+        function freqToNote(freq) {
+            const noteNum = 12 * (Math.log(freq / 440) / Math.log(2));
+            return NOTES[(Math.round(noteNum) + 69) % 12];
+        }
+    </script>
+</body>
+</html>
